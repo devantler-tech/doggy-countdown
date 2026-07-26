@@ -24,9 +24,10 @@ Tagging `v*` runs the shared publish workflow, which builds the image, pins its
 digest into `deploy/deployment.yaml`, and publishes `deploy/` as a cosign-signed
 OCI artifact. The platform pulls that artifact and reconciles it.
 
-## Not wired up yet
+## Where it runs
 
-The app has no `HTTPRoute`, `Certificate` or DNS records, because no hostname
-has been chosen. Until one is, the Deployment and Service reconcile but nothing
-is reachable from outside the cluster. The platform-side tenant wiring
-(namespace, `OCIRepository`, `Kustomization`) is likewise still to come.
+https://simba.platform.devantler.tech
+
+The shared platform gateway already holds a `*.platform.devantler.tech`
+certificate, so this app needs no certificate of its own, and external-dns
+creates the DNS record from the HTTPRoute hostname.

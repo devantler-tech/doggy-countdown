@@ -157,24 +157,6 @@
     font-size: 1.35rem; left: 0; transition: left 1s ease; filter: saturate(1.1);
   }
 
-  /* ---------- gallery ---------- */
-  h2 {
-    text-align: center; font-size: 1.35rem; margin: 46px 0 4px; font-weight: 800;
-  }
-  .h2sub { text-align: center; color: var(--ink-soft); margin: 0 0 22px; font-size: .95rem; }
-  .gallery {
-    display: grid; gap: 13px;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  }
-  .gallery figure { margin: 0; }
-  .gallery img {
-    width: 100%; aspect-ratio: 3/4; object-fit: cover; object-position: 50% 58%;
-    border-radius: 18px; box-shadow: var(--shadow); display: block;
-    border: 5px solid var(--card);
-    transition: transform .35s cubic-bezier(.2,.8,.3,1);
-  }
-  .gallery img:hover, .gallery img:focus-visible { transform: translateY(-7px) rotate(-1.1deg); }
-
   /* ---------- facts ---------- */
   .facts {
     display: grid; gap: 12px; margin-top: 34px;
@@ -217,7 +199,7 @@
     <span class="kicker">🐾 Cocker Spaniel &middot; Coming home</span>
 
     <div class="portrait-wrap">
-      <img class="portrait" src="img/simba-5.jpg" alt="Simba, a golden Cocker Spaniel puppy, asleep in cupped hands" />
+      <img class="portrait" src="img/simba.jpg" alt="Simba, a golden Cocker Spaniel puppy, asleep in cupped hands" />
       <span class="badge">Simba 🧡</span>
     </div>
 
@@ -245,15 +227,6 @@
     </div>
   </section>
 
-  <h2>While we wait…</h2>
-  <p class="h2sub">Sleepy, golden, and entirely unbothered by any of this.</p>
-
-  <section class="gallery">
-    <figure><img src="img/simba-1.jpg" alt="Simba curled up asleep" loading="lazy" /></figure>
-    <figure><img src="img/simba-2.jpg" alt="Simba dozing with his paws tucked in" loading="lazy" /></figure>
-    <figure><img src="img/simba-3.jpg" alt="Simba resting in cupped hands" loading="lazy" /></figure>
-    <figure><img src="img/simba-4.jpg" alt="Close-up of Simba's face while he sleeps" loading="lazy" /></figure>
-  </section>
 
   <section class="facts">
     <div class="fact"><div class="k">Breed</div><div class="v">Cocker Spaniel 🐕</div></div>

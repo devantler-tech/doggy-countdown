@@ -4,8 +4,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - pod-disruption-budget.yaml
-  # No httproute/certificate/issuer/external-dns yet: no hostname has been
-  # chosen for this app. Until one is, the workload runs but is reachable only
-  # from inside the cluster. The tenant-owned CiliumNetworkPolicy allow-list
-  # belongs with that same change, since what it must allow depends on the
-  # ingress path.
+  - httproute.yaml
+  # Tenant-owned CiliumNetworkPolicy allow-list on top of the platform's
+  # default-deny floor.
+  - networkpolicy.yaml

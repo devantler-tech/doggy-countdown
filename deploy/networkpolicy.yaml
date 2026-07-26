@@ -1,0 +1,34 @@
+# Tenant-owned allow-list, layered on the platform's default-deny floor (the
+# platform's `add-default-deny` Kyverno policy generates a deny-all + allow-dns
+# CiliumNetworkPolicy in this namespace; this re-opens only what the app needs).
+# A purely static site: it accepts Gateway ingress and resolves DNS. It makes no
+# egress calls of its own.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: app
+  namespace: doggy-countdown
+  labels:
+    app.kubernetes.io/name: app
+spec:
+  endpointSelector: {}
+  ingress:
+    # Gateway ingress — static site served by unprivileged nginx on 8080
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # DNS resolution
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

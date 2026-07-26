@@ -1,0 +1,30 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: doggy-countdown
+  namespace: doggy-countdown
+  # Homepage dashboard entry — tenant self-presentation, discovered by the
+  # platform's homepage app wherever these annotations are authored.
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: Simba Countdown
+    gethomepage.dev/description: Countdown to the day Simba comes home.
+    gethomepage.dev/group: Fun
+    gethomepage.dev/icon: mdi-dog
+    gethomepage.dev/href: https://simba.platform.devantler.tech
+    gethomepage.dev/pod-selector: app.kubernetes.io/name=doggy-countdown
+spec:
+  parentRefs:
+    # The shared hostname-less HTTPS listener. Its certificate already covers
+    # *.platform.devantler.tech, so this host needs no Certificate of its own.
+    - name: platform
+      namespace: kube-system
+      sectionName: https
+  hostnames:
+    # external-dns watches gateway-httproute sources with --domain-filter
+    # devantler.tech, so the Cloudflare record is created from this hostname.
+    - simba.platform.devantler.tech
+  rules:
+    - backendRefs:
+        - name: doggy-countdown
+          port: 80
