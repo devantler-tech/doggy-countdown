@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doggy-countdown
+  labels:
+    app.kubernetes.io/name: doggy-countdown
+    # Deliberate 2-replica deployment: opt out of the platform's 3-replica HA
+    # floor (validate-replica-floor, platform#1882). 2 replicas + the
+    # DoNotSchedule hostname spread + the maxUnavailable: 1 PDB keep one replica
+    # up through a node drain; a third replica buys headroom a single static
+    # page does not need.
+    platform.devantler.tech/replica-floor: exempt
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: doggy-countdown
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: doggy-countdown
+    spec:
+      imagePullSecrets:
+        - name: ghcr-auth
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: doggy-countdown
+      containers:
+        - name: doggy-countdown
+          image: ghcr.io/devantler-tech/doggy-countdown:latest
+          imagePullPolicy: Always
+          ports:
+            # Static site served by unprivileged nginx (listens on 8080).
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Kubescape C-0017 (immutable container filesystem). The writable-path
+            # set below is a property of this image (nginx-unprivileged), so it
+            # belongs here rather than in a platform-side patch (platform#2489).
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # nginx-unprivileged writes to a small set of paths at runtime; with a
+          # read-only root they must be backed by writable emptyDirs or nginx
+          # fails to start ("mkdir ... Read-only file system").
+          #   * /tmp             REQUIRED — pid file plus every temp path.
+          #   * /var/cache/nginx defensive — present in the base image, unused by
+          #                      this purely-static config.
+          #   * /var/run         defensive — the image's canonical writable set.
+          # Logs go to /dev/stdout + /dev/stderr, so no /var/log mount is needed
+          # and the docroot stays read-only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: nginx-run
+          emptyDir:
+            sizeLimit: 64Mi
