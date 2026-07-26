@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Simba is coming home</title>
+<meta name="description" content="A countdown to the day Simba, our Cocker Spaniel puppy, comes home." />
+<style>
+  :root {
+    --cream:      #FDF7EE;
+    --cream-2:    #F7E9D6;
+    --apricot:    #E3A461;
+    --gold:       #C9813B;
+    --gold-deep:  #A8672C;
+    --olive:      #7C8355;
+    --lilac:      #CDC0C8;
+    --ink:        #4A3626;
+    --ink-soft:   #7A6350;
+    --card:       #FFFFFFEE;
+    --shadow:     0 10px 30px -12px rgba(120, 80, 40, .38);
+    --radius:     22px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --cream:    #241B14;
+      --cream-2:  #33261B;
+      --ink:      #F6E9DA;
+      --ink-soft: #C6AC93;
+      --card:     #33261BE6;
+      --shadow:   0 10px 30px -12px rgba(0, 0, 0, .6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --cream: #241B14; --cream-2: #33261B; --ink: #F6E9DA;
+    --ink-soft: #C6AC93; --card: #33261BE6;
+    --shadow: 0 10px 30px -12px rgba(0,0,0,.6);
+  }
+  :root[data-theme="light"] {
+    --cream: #FDF7EE; --cream-2: #F7E9D6; --ink: #4A3626;
+    --ink-soft: #7A6350; --card: #FFFFFFEE;
+    --shadow: 0 10px 30px -12px rgba(120,80,40,.38);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", Nunito, system-ui, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1100px 700px at 12% -8%, var(--cream-2) 0%, transparent 62%),
+      radial-gradient(900px 620px at 92% 4%, #E9C79A55 0%, transparent 58%),
+      var(--cream);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* floating paws */
+  .paws { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+  .paw {
+    position: absolute; width: 26px; height: 26px; opacity: .16;
+    animation: drift linear infinite;
+    color: var(--gold);
+  }
+  @keyframes drift {
+    0%   { transform: translateY(108vh) rotate(0deg)   scale(.8); }
+    100% { transform: translateY(-14vh) rotate(320deg) scale(1.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .paw { animation: none; display: none; }
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+
+  .wrap { position: relative; z-index: 1; max-width: 1000px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  /* ---------- hero ---------- */
+  header.hero { text-align: center; padding: 18px 0 6px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: .82rem; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--gold-deep); font-weight: 700;
+    background: #E3A46122; border: 1px solid #E3A46144;
+    padding: 7px 15px; border-radius: 999px;
+  }
+  h1 {
+    font-size: clamp(2.4rem, 7vw, 4.3rem);
+    line-height: 1.02; margin: 16px 0 6px; font-weight: 800;
+    letter-spacing: -.02em;
+  }
+  h1 .name {
+    background: linear-gradient(135deg, var(--gold) 0%, var(--apricot) 55%, var(--gold-deep) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--ink-soft); font-size: clamp(1rem, 2.4vw, 1.18rem); margin: 0 0 26px; }
+
+  .portrait-wrap { position: relative; width: fit-content; margin: 6px auto 30px; }
+  .portrait {
+    width: clamp(190px, 46vw, 264px); aspect-ratio: 1;
+    border-radius: 50%; object-fit: cover; object-position: 50% 62%;
+    border: 7px solid var(--card); box-shadow: var(--shadow);
+    animation: bob 5.5s ease-in-out infinite;
+  }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+  .badge {
+    position: absolute; right: -6px; bottom: 10px;
+    background: var(--card); border-radius: 999px; padding: 9px 15px;
+    box-shadow: var(--shadow); font-weight: 800; font-size: .9rem;
+    border: 1px solid #E3A46133; white-space: nowrap;
+  }
+
+  /* ---------- countdown ---------- */
+  .count {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin: 0 auto 10px; max-width: 720px;
+  }
+  .cell {
+    background: var(--card); border-radius: var(--radius); padding: 20px 8px 14px;
+    box-shadow: var(--shadow); text-align: center;
+    border: 1px solid #E3A46126;
+  }
+  .cell .n {
+    font-size: clamp(1.9rem, 6.4vw, 3.1rem); font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  }
+  .cell.days .n {
+    background: linear-gradient(135deg, var(--gold) 0%, var(--apricot) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .cell .l {
+    margin-top: 8px; font-size: .72rem; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--ink-soft); font-weight: 700;
+  }
+  .cell.secs .n { animation: tick 1s ease-in-out infinite; }
+  @keyframes tick { 0%,100% { opacity: 1; } 50% { opacity: .62; } }
+
+  /* ---------- progress ---------- */
+  .progress-card {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 20px 22px; margin: 22px auto 0; max-width: 720px; border: 1px solid #E3A46126;
+  }
+  .progress-top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: .84rem; color: var(--ink-soft); font-weight: 700; margin-bottom: 12px;
+  }
+  .progress-top b { color: var(--gold-deep); font-size: 1rem; }
+  .track {
+    position: relative; height: 16px; border-radius: 999px;
+    background: #E3A46126; overflow: visible;
+  }
+  .fill {
+    height: 100%; border-radius: 999px; width: 0%;
+    background: linear-gradient(90deg, var(--apricot), var(--gold));
+    transition: width 1s ease;
+  }
+  .runner {
+    position: absolute; top: 50%; transform: translate(-50%, -50%);
+    font-size: 1.35rem; left: 0; transition: left 1s ease; filter: saturate(1.1);
+  }
+
+  /* ---------- gallery ---------- */
+  h2 {
+    text-align: center; font-size: 1.35rem; margin: 46px 0 4px; font-weight: 800;
+  }
+  .h2sub { text-align: center; color: var(--ink-soft); margin: 0 0 22px; font-size: .95rem; }
+  .gallery {
+    display: grid; gap: 13px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .gallery figure { margin: 0; }
+  .gallery img {
+    width: 100%; aspect-ratio: 3/4; object-fit: cover; object-position: 50% 58%;
+    border-radius: 18px; box-shadow: var(--shadow); display: block;
+    border: 5px solid var(--card);
+    transition: transform .35s cubic-bezier(.2,.8,.3,1);
+  }
+  .gallery img:hover, .gallery img:focus-visible { transform: translateY(-7px) rotate(-1.1deg); }
+
+  /* ---------- facts ---------- */
+  .facts {
+    display: grid; gap: 12px; margin-top: 34px;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+  .fact {
+    background: var(--card); border-radius: 18px; padding: 17px 19px;
+    box-shadow: var(--shadow); border: 1px solid #E3A46126;
+  }
+  .fact .k {
+    font-size: .7rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 700;
+  }
+  .fact .v { font-size: 1.06rem; font-weight: 800; margin-top: 6px; }
+
+  footer {
+    text-align: center; margin-top: 44px; color: var(--ink-soft);
+    font-size: .87rem; line-height: 1.6;
+  }
+
+  /* ---------- arrival state ---------- */
+  .arrived .count, .arrived .progress-card { display: none; }
+  .arrived-msg { display: none; }
+  .arrived .arrived-msg {
+    display: block; text-align: center; font-size: clamp(1.5rem, 5vw, 2.4rem);
+    font-weight: 800; margin: 10px 0 6px;
+  }
+
+  @media (max-width: 520px) {
+    .count { grid-template-columns: repeat(2, 1fr); }
+    .wrap { padding: 20px 16px 48px; }
+  }
+</style>
+</head>
+<body>
+<div class="paws" id="paws" aria-hidden="true"></div>
+
+<div class="wrap">
+  <header class="hero">
+    <span class="kicker">🐾 Cocker Spaniel &middot; Coming home</span>
+
+    <div class="portrait-wrap">
+      <img class="portrait" src="img/simba-5.jpg" alt="Simba, a golden Cocker Spaniel puppy, asleep in cupped hands" />
+      <span class="badge">Simba 🧡</span>
+    </div>
+
+    <h1><span class="name">Simba</span> is coming home</h1>
+    <p class="sub">Monday 24 August 2026 &middot; the day the house gets a lot louder</p>
+  </header>
+
+  <div class="arrived-msg">🎉 Simba is home! 🐶</div>
+
+  <section class="count" id="count" aria-live="polite" aria-label="Time until Simba comes home">
+    <div class="cell days"><div class="n" id="d">--</div><div class="l">Days</div></div>
+    <div class="cell"><div class="n" id="h">--</div><div class="l">Hours</div></div>
+    <div class="cell"><div class="n" id="m">--</div><div class="l">Minutes</div></div>
+    <div class="cell secs"><div class="n" id="s">--</div><div class="l">Seconds</div></div>
+  </section>
+
+  <section class="progress-card">
+    <div class="progress-top">
+      <span>Puppy progress</span>
+      <b id="pct">0%</b>
+    </div>
+    <div class="track">
+      <div class="fill" id="fill"></div>
+      <span class="runner" id="runner">🐾</span>
+    </div>
+  </section>
+
+  <h2>While we wait…</h2>
+  <p class="h2sub">Sleepy, golden, and entirely unbothered by any of this.</p>
+
+  <section class="gallery">
+    <figure><img src="img/simba-1.jpg" alt="Simba curled up asleep" loading="lazy" /></figure>
+    <figure><img src="img/simba-2.jpg" alt="Simba dozing with his paws tucked in" loading="lazy" /></figure>
+    <figure><img src="img/simba-3.jpg" alt="Simba resting in cupped hands" loading="lazy" /></figure>
+    <figure><img src="img/simba-4.jpg" alt="Close-up of Simba's face while he sleeps" loading="lazy" /></figure>
+  </section>
+
+  <section class="facts">
+    <div class="fact"><div class="k">Breed</div><div class="v">Cocker Spaniel 🐕</div></div>
+    <div class="fact"><div class="k">Homecoming</div><div class="v">Mon 24 Aug 2026</div></div>
+    <div class="fact"><div class="k">Ears</div><div class="v">Extremely floppy</div></div>
+    <div class="fact"><div class="k">Naps per day</div><div class="v">Approximately all</div></div>
+  </section>
+
+  <footer>
+    Made with 🧡 while waiting for a very small dog.
+  </footer>
+</div>
+
+<script>
+  // ---- floating paws ----
+  (function () {
+    var host = document.getElementById('paws');
+    var svg = '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="7.5" cy="8" rx="2.1" ry="2.8"/>'
+            + '<ellipse cx="12" cy="6.4" rx="2.1" ry="2.9"/><ellipse cx="16.5" cy="8" rx="2.1" ry="2.8"/>'
+            + '<ellipse cx="19.2" cy="12.3" rx="1.9" ry="2.4"/>'
+            + '<path d="M12 11.4c3.2 0 5.6 2.3 5.6 4.8 0 2-1.6 3.2-3.6 3.2-1 0-1.4-.35-2-.35s-1 .35-2 .35c-2 0-3.6-1.2-3.6-3.2 0-2.5 2.4-4.8 5.6-4.8z"/></svg>';
+    for (var i = 0; i < 14; i++) {
+      var p = document.createElement('div');
+      p.className = 'paw';
+      p.innerHTML = svg;
+      p.style.left = (Math.random() * 100) + 'vw';
+      p.style.animationDuration = (17 + Math.random() * 20) + 's';
+      p.style.animationDelay = (-Math.random() * 30) + 's';
+      p.style.transform = 'scale(' + (0.55 + Math.random() * 0.9) + ')';
+      host.appendChild(p);
+    }
+  })();
+
+  // ---- countdown ----
+  var TARGET = new Date('2026-08-24T00:00:00+02:00'); // Monday, Danish summer time
+  var START  = new Date('2026-07-26T00:00:00+02:00'); // the day this countdown began
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function render() {
+    var now = new Date();
+    var left = TARGET - now;
+
+    if (left <= 0) {
+      document.body.classList.add('arrived');
+      document.title = 'Simba is home!';
+      return;
+    }
+
+    var secs = Math.floor(left / 1000);
+    var d = Math.floor(secs / 86400);
+    var h = Math.floor((secs % 86400) / 3600);
+    var m = Math.floor((secs % 3600) / 60);
+    var s = secs % 60;
+
+    document.getElementById('d').textContent = d;
+    document.getElementById('h').textContent = pad(h);
+    document.getElementById('m').textContent = pad(m);
+    document.getElementById('s').textContent = pad(s);
+
+    var total = TARGET - START;
+    var done  = Math.min(1, Math.max(0, (now - START) / total));
+    var pct   = Math.round(done * 1000) / 10;
+
+    document.getElementById('fill').style.width = pct + '%';
+    document.getElementById('runner').style.left = pct + '%';
+    document.getElementById('pct').textContent = pct.toFixed(1) + '%';
+
+    document.title = d + ' days until Simba comes home';
+  }
+
+  render();
+  setInterval(render, 1000);
+</script>
+</body>
+</html>
