@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:
@@ -60,19 +64,9 @@ jobs:
 
           exit "$status"
 
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # checkout repository
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: 🐳 Build the image
-        run: docker build -t doggy-countdown:ci .
-
+  # No separate build job: container-smoke builds the same image with the same
+  # command, so a build failure already fails it. A standalone build job would
+  # double the image build per pull request while adding no signal.
   container-smoke:
     name: Container Smoke
     runs-on: ubuntu-latest
@@ -130,37 +124,67 @@ jobs:
           [ "$ro_root" = "true" ] && args+=(--read-only)
           for m in "${mount_paths[@]}"; do args+=(--tmpfs "$m"); done
 
-          echo "mirroring deployment: port=${port} user=${user}:${group} readOnlyRoot=${ro_root}"
+          # Host port is this workflow's choice; container port comes from the
+          # manifest. Keeping them in separate variables stops the diagnostics
+          # naming a port the check never probed.
+          host_port=8080
+          base="http://localhost:${host_port}"
+
+          echo "mirroring deployment: containerPort=${port} user=${user}:${group} readOnlyRoot=${ro_root}"
           printf '  writable mount: %s\n' "${mount_paths[@]}"
 
-          docker run -d --rm -p "8080:${port}" "${args[@]}" --name doggy-smoke doggy-countdown:ci
+          docker run -d --rm -p "${host_port}:${port}" "${args[@]}" --name doggy-smoke doggy-countdown:ci
 
           # Fail closed: a homepage that never becomes ready is a broken image.
           ready=false
           for _ in $(seq 1 30); do
-            if curl -fsS -o /dev/null http://localhost:8080/; then ready=true; break; fi
+            if curl -fsS -o /dev/null "${base}/"; then ready=true; break; fi
             sleep 1
           done
           if [ "$ready" != true ]; then
             docker logs doggy-smoke || true
             docker stop doggy-smoke
-            echo "::error::container did not serve / on port ${port} within 30s"
+            echo "::error::container did not serve / within 30s (host ${host_port} -> container ${port})"
             exit 1
           fi
 
           # The image must serve the asset this PR actually checked, not merely
           # something with a 200. Compare against the countdown target, which
           # date-consistency has already pinned to the rendered dates.
-          served=$(curl -fsS http://localhost:8080/)
-          docker stop doggy-smoke
+          served=$(curl -fsS "${base}/")
 
           iso=$(grep -oE "TARGET *= *new Date\('[^']+'\)" public/index.html \
             | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}T[^']*")
           if ! printf '%s' "$served" | grep -qF "$iso"; then
+            docker stop doggy-smoke
             echo "::error::the served page does not carry the countdown target ${iso}"
             exit 1
           fi
           echo "✅ served page carries the countdown target ${iso}"
+
+          # Every asset the page references must actually be served. A 200 on /
+          # says nothing about them: a missing image still renders the page, just
+          # with a broken picture on it. Derived from the page rather than named
+          # here, so an asset added later is covered without editing this.
+          assets=()
+          while IFS= read -r a; do assets+=("$a"); done < <(
+            grep -oE '(src|href)="[^"]+"' public/index.html \
+              | sed -E 's/^(src|href)="//; s/"$//' \
+              | grep -vE '^([a-zA-Z]+:|//|#|data:|mailto:)' \
+              | sort -u
+          )
+
+          status=0
+          for a in "${assets[@]}"; do
+            if curl -fsS -o /dev/null "${base}/${a#/}"; then
+              echo "  ✅ ${a}"
+            else
+              echo "::error::referenced asset is not served: ${a}"
+              status=1
+            fi
+          done
+          docker stop doggy-smoke
+          exit "$status"
 
   manifests:
     name: Manifests
@@ -179,7 +203,12 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          for f in deploy/*.yaml; do
+          # Both extensions: a manifest added as .yml would otherwise pass this
+          # job unchecked and never ship — the exact failure this step exists to
+          # catch. nullglob so a missing extension contributes nothing rather
+          # than a literal unexpanded pattern.
+          shopt -s nullglob
+          for f in deploy/*.yaml deploy/*.yml; do
             base=$(basename "$f")
             [ "$base" = "kustomization.yaml" ] && continue
             if grep -qE "^[[:space:]]*-[[:space:]]+${base}$" deploy/kustomization.yaml; then
@@ -201,7 +230,7 @@ jobs:
           # never reach kubeconform at all.
           refs=()
           while IFS= read -r r; do refs+=("$r"); done < <(
-            grep -oE '^[[:space:]]*-[[:space:]]+[A-Za-z0-9._-]+\.yaml[[:space:]]*$' \
+            grep -oE '^[[:space:]]*-[[:space:]]+[A-Za-z0-9._-]+\.ya?ml[[:space:]]*$' \
               deploy/kustomization.yaml | awk '{print $2}'
           )
           if [ "${#refs[@]}" -eq 0 ]; then
@@ -242,7 +271,7 @@ jobs:
   ci-required-checks:
     name: CI - Required Checks
     runs-on: ubuntu-latest
-    needs: [date-consistency, build, container-smoke, manifests]
+    needs: [date-consistency, container-smoke, manifests]
     permissions: {}
     if: ${{ always() }}
     steps:
@@ -251,6 +280,5 @@ jobs:
         with:
           job-results: >-
             ${{ needs.date-consistency.result }}
-            ${{ needs.build.result }}
             ${{ needs.container-smoke.result }}
             ${{ needs.manifests.result }}
