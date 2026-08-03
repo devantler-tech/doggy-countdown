@@ -188,9 +188,15 @@ jobs:
           docker run -d --rm -p "${host_port}:${port}" "${args[@]}" --name doggy-smoke doggy-countdown:ci
 
           # Fail closed: a homepage that never becomes ready is a broken image.
+          #
+          # ONE deadline for the whole loop. --max-time bounds a single transfer,
+          # so 30 attempts of it is a ~330s worst case, not the 30s this loop
+          # reads as — an image that accepts connections and stalls would sit far
+          # longer than intended.
           ready=false
-          for _ in $(seq 1 30); do
-            if curl -fsS --max-time 10 -o /dev/null "${base}/"; then ready=true; break; fi
+          deadline=$(( SECONDS + 30 ))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if curl -fsS --max-time 5 -o /dev/null "${base}/"; then ready=true; break; fi
             sleep 1
           done
           if [ "$ready" != true ]; then
@@ -381,6 +387,20 @@ jobs:
             printf '  %s\n' "$bad"
             exit 1
           fi
+
+          # A referenced file that produced NO resource — emptied, or comment-only —
+          # yields no entry for the analysis above to flag, so it would ship as an
+          # absent resource while every check reported clean. Compare the files
+          # kubeconform actually reported on against the files we asked about.
+          seen=$(printf '%s' "$out" | jq -r '[.resources[]?.filename] | unique | .[]' 2>/dev/null || true)
+          missing=0
+          for pth in "${paths[@]}"; do
+            if ! printf '%s\n' "$seen" | grep -qxF "$pth"; then
+              echo "::error::${pth} is referenced by the kustomization but produced no resource"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || exit 1
 
           # Only now act on kubeconform's own status, so its per-resource report
           # is always printed first. A non-zero exit with nothing in "bad" means
