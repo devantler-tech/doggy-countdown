@@ -193,10 +193,16 @@ jobs:
           # so any OTHER failure in the step left the container running and
           # skipped the diagnostics with it.
           # shellcheck disable=SC2329  # invoked indirectly by the trap below
-          cleanup() { docker logs doggy-smoke 2>&1 | tail -20 || true; docker stop doggy-smoke >/dev/null 2>&1 || true; }
+          cleanup() { docker logs doggy-smoke 2>&1 | tail -20 || true; docker rm -f doggy-smoke >/dev/null 2>&1 || true; }
           trap cleanup EXIT
 
-          docker run -d --rm -p "${host_port}:${port}" "${args[@]}" --name doggy-smoke doggy-countdown:ci
+          # Deliberately NOT --rm. Under the mirrored restrictions the failure
+          # this step exists to catch is nginx refusing to start — and with --rm
+          # Docker deletes the container the moment it exits, so `docker logs`
+          # in cleanup finds nothing and `|| true` hides that it found nothing.
+          # The one run that most needs the diagnostics is the one that loses
+          # them. cleanup removes the container instead, after reading it.
+          docker run -d -p "${host_port}:${port}" "${args[@]}" --name doggy-smoke doggy-countdown:ci
 
           # Fail closed: a homepage that never becomes ready is a broken image.
           #
@@ -204,10 +210,18 @@ jobs:
           # so 30 attempts of it is a ~330s worst case, not the 30s this loop
           # reads as — an image that accepts connections and stalls would sit far
           # longer than intended.
+          #
+          # A container that has already exited will never become ready, so stop
+          # waiting for it: without this the loop burns the full 30s on a crash
+          # that was decided in the first second.
           ready=false
           deadline=$(( SECONDS + 30 ))
           while [ "$SECONDS" -lt "$deadline" ]; do
             if curl -fsS --max-time 5 -o /dev/null "${base}/"; then ready=true; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' doggy-smoke 2>/dev/null)" != "true" ]; then
+              echo "::error::container exited before serving / (host ${host_port} -> container ${port})"
+              exit 1
+            fi
             sleep 1
           done
           if [ "$ready" != true ]; then
@@ -382,7 +396,17 @@ jobs:
           # Raw output first. Every per-resource assertion here depends on this
           # shape, so it belongs in the log rather than being inferred.
           echo "--- kubeconform raw output ---"
-          printf '%s\n' "$out" | head -40
+          # `|| true` because this step runs under `set -euo pipefail`. head
+          # closes the pipe after its 40th line; once the report outgrows the
+          # ~64KB pipe buffer printf can no longer finish writing, takes EPIPE,
+          # and pipefail turns that into a step failure — silently skipping the
+          # allowed-skip analysis, the missing-resource check and the rc report
+          # that follow. The trigger is the buffer, not the line count: at
+          # today's ~2KB the whole report fits and printf completes before head
+          # exits, which is why this has never fired. It would begin firing
+          # somewhere past ~30x the current manifest count, and the failure mode
+          # is a silently truncated check rather than a visible error.
+          printf '%s\n' "$out" | head -40 || true
           echo "--- end raw output ---"
           printf '%s\n' "$out" | jq -r '.resources[]? | "  \(.status)  \(.kind)  \(.filename)"' || true
 
