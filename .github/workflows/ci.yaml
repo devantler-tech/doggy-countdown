@@ -36,10 +36,30 @@ jobs:
             exit 1
           fi
 
-          # Take the calendar date only. Converting the full timestamp would
-          # reinterpret midnight +02:00 as 22:00 UTC the PREVIOUS day on this
-          # runner, so every rendering would be compared against the wrong
-          # weekday and date.
+          # Validate the WHOLE timestamp, not just the calendar prefix. A valid
+          # date with a malformed time — 2026-08-24T25:00:00+02:00 — yields an
+          # Invalid Date in the browser and renders NaN, while every check below
+          # (which only ever looks at the prefix) would still pass.
+          if [[ ! "$iso" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T([0-9]{2}):([0-9]{2}):([0-9]{2})(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+            echo "::error::countdown target is not a well-formed RFC 3339 timestamp: ${iso}"
+            exit 1
+          fi
+          hh="${BASH_REMATCH[1]}"; mm="${BASH_REMATCH[2]}"; ss="${BASH_REMATCH[3]}"
+          # 10#: these are zero-padded, and bash reads a leading zero as octal.
+          if ((10#$hh > 23 || 10#$mm > 59 || 10#$ss > 59)); then
+            echo "::error::countdown target has an out-of-range time: ${iso}"
+            exit 1
+          fi
+          # The calendar date must also be real; date -u rejects 2026-02-30.
+          if ! date -u -d "${iso%%T*}" >/dev/null 2>&1; then
+            echo "::error::countdown target is not a real calendar date: ${iso}"
+            exit 1
+          fi
+
+          # Compare the RENDERED prose against the calendar date only. Converting
+          # the full timestamp would reinterpret midnight +02:00 as 22:00 UTC the
+          # PREVIOUS day on this runner, so every rendering would be checked
+          # against the wrong weekday.
           day="${iso%%T*}"
           long=$(date -u -d "$day" +'%A %-d %B %Y')
           short=$(date -u -d "$day" +'%a %-d %b %Y')
@@ -166,12 +186,17 @@ jobs:
           # says nothing about them: a missing image still renders the page, just
           # with a broken picture on it. Derived from the page rather than named
           # here, so an asset added later is covered without editing this.
+          # Covers both attribute references and CSS url(...) references: the
+          # page carries inline CSS, so a background-image would otherwise be
+          # invisible here and break in production exactly like a missing <img>.
           assets=()
           while IFS= read -r a; do assets+=("$a"); done < <(
-            grep -oE '(src|href)="[^"]+"' public/index.html \
-              | sed -E 's/^(src|href)="//; s/"$//' \
-              | grep -vE '^([a-zA-Z]+:|//|#|data:|mailto:)' \
-              | sort -u
+            {
+              grep -oE '(src|href)="[^"]+"' public/index.html \
+                | sed -E 's/^(src|href)="//; s/"$//'
+              grep -oE 'url\((\"|'"'"')?[^)\"'"'"']+' public/index.html \
+                | sed -E 's/^url\((\"|'"'"')?//'
+            } | grep -vE '^([a-zA-Z]+:|//|#|data:|mailto:)' | grep -v '^$' | sort -u
           )
 
           status=0
@@ -203,6 +228,29 @@ jobs:
         run: |
           set -euo pipefail
           status=0
+          command -v yq >/dev/null || { echo "::error::yq is required by this check"; exit 1; }
+
+          # Validate the kustomization ITSELF before trusting anything in it. A
+          # mistyped `resources:` key leaves the filenames sitting in the file
+          # where a grep would still find them, so both manifest checks would
+          # pass over a kustomization that cannot actually be built.
+          kind=$(yq -r '.kind // ""' deploy/kustomization.yaml)
+          if [ "$kind" != "Kustomization" ]; then
+            echo "::error::deploy/kustomization.yaml has kind '${kind:-<missing>}', expected Kustomization"
+            exit 1
+          fi
+          if [ "$(yq -r '.resources | type' deploy/kustomization.yaml)" != "!!seq" ]; then
+            echo "::error::deploy/kustomization.yaml has no 'resources' list — nothing would ship"
+            exit 1
+          fi
+
+          # Read the entries as VALUES rather than matching them as patterns. An
+          # interpolated filename in an ERE makes '.' a wildcard, so a typo like
+          # `deploymentXyaml` would match the real deployment.yaml and report it
+          # as correctly referenced.
+          refs=()
+          while IFS= read -r r; do refs+=("$r"); done < <(yq -r '.resources[]' deploy/kustomization.yaml)
+
           # Both extensions: a manifest added as .yml would otherwise pass this
           # job unchecked and never ship — the exact failure this step exists to
           # catch. nullglob so a missing extension contributes nothing rather
@@ -211,10 +259,20 @@ jobs:
           for f in deploy/*.yaml deploy/*.yml; do
             base=$(basename "$f")
             [ "$base" = "kustomization.yaml" ] && continue
-            if grep -qE "^[[:space:]]*-[[:space:]]+${base}$" deploy/kustomization.yaml; then
+            found=0
+            for r in "${refs[@]}"; do [ "$r" = "$base" ] && found=1 && break; done
+            if [ "$found" = 1 ]; then
               echo "  ✅ ${base}"
             else
               echo "::error::${base} is not listed in deploy/kustomization.yaml, so it would never ship"
+              status=1
+            fi
+          done
+
+          # And the converse: an entry naming a file that does not exist.
+          for r in "${refs[@]}"; do
+            if [ ! -f "deploy/${r}" ]; then
+              echo "::error::deploy/kustomization.yaml references '${r}', which does not exist"
               status=1
             fi
           done
@@ -228,11 +286,10 @@ jobs:
           # that actually ships. A hard-coded file list would let a newly added,
           # correctly-referenced manifest pass the membership check above and
           # never reach kubeconform at all.
+          command -v yq >/dev/null || { echo "::error::yq is required by this check"; exit 1; }
+
           refs=()
-          while IFS= read -r r; do refs+=("$r"); done < <(
-            grep -oE '^[[:space:]]*-[[:space:]]+[A-Za-z0-9._-]+\.ya?ml[[:space:]]*$' \
-              deploy/kustomization.yaml | awk '{print $2}'
-          )
+          while IFS= read -r r; do refs+=("$r"); done < <(yq -r '.resources[]' deploy/kustomization.yaml)
           if [ "${#refs[@]}" -eq 0 ]; then
             echo "::error::no manifests referenced from deploy/kustomization.yaml"
             exit 1
@@ -249,7 +306,11 @@ jobs:
           # skipped. Declaring WHICH kinds may be skipped — rather than how many —
           # is what stops a core resource silently dropping out of validation: a
           # skipped Deployment fails here instead of reading as a clean run.
-          allowed_skips='["HTTPRoute","CiliumNetworkPolicy"]'
+          # Pinned to exact apiVersion+kind, not kind alone. `-ignore-missing-schemas`
+          # skips anything it has no schema for, so a typo'd group or version —
+          # gateway.networking.k8s.io/v999 — is skipped too, and a kind-only
+          # exemption would wave through a GVK the cluster cannot serve.
+          allowed_skips='[{"v":"gateway.networking.k8s.io/v1","k":"HTTPRoute"},{"v":"cilium.io/v2","k":"CiliumNetworkPolicy"}]'
 
           # Normalise the status before comparing. kubeconform spells these
           # "statusValid"/"statusSkipped"; matching the bare suffix
@@ -257,10 +318,11 @@ jobs:
           # resting on a spelling this workflow never verifies.
           bad=$(printf '%s' "$out" | jq -r --argjson allow "$allowed_skips" '
             def norm: (. // "") | ascii_downcase | sub("^status"; "");
+            def allowed: . as $r | any($allow[]; .v == $r.version and .k == $r.kind);
             [ .resources[]
               | select((.status | norm) != "valid")
-              | select((((.status | norm) == "skipped") and (.kind | IN($allow[]))) | not)
-            ] | map("\(.status) \(.kind // "?") \(.filename // "?")") | .[]')
+              | select((((.status | norm) == "skipped") and allowed) | not)
+            ] | map("\(.status) \(.version // "?") \(.kind // "?") \(.filename // "?")") | .[]')
           if [ -n "$bad" ]; then
             echo "::error::unexpected validation status (only these kinds may be skipped: ${allowed_skips}):"
             printf '  %s\n' "$bad"
