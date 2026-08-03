@@ -86,19 +86,54 @@ jobs:
       - name: 🐳 Build the image
         run: docker build -t doggy-countdown:ci .
 
-      # Exercises the image the way the Deployment does: unprivileged nginx on
-      # 8080. The port is asserted rather than assumed, because deployment.yaml
-      # hard-codes containerPort 8080 and its probes target it — an image that
-      # served on 80 would pass a build-only check and then fail every probe.
-      - name: 🔥 The container serves the countdown on 8080
+      # Exercises the image under the SAME restrictions the Deployment imposes,
+      # all derived from deploy/deployment.yaml rather than restated here.
+      #
+      # An unrestricted `docker run` is close to worthless as a pre-deploy check:
+      # the pod runs as UID/GID 1000 with a read-only root and exactly three
+      # writable mounts, so an image that needs to write anywhere else — or that
+      # only works as root — passes an unrestricted smoke test and then
+      # CrashLoopBackOffs in production. Mirroring the restrictions is what makes
+      # a green here mean "this will start".
+      - name: 🔥 The container serves the countdown under production restrictions
         run: |
           set -euo pipefail
 
           port=$(grep -oE 'containerPort: *[0-9]+' deploy/deployment.yaml \
             | grep -oE '[0-9]+' | head -1)
-          echo "deployment.yaml expects containerPort $port"
+          user=$(grep -oE 'runAsUser: *[0-9]+' deploy/deployment.yaml | grep -oE '[0-9]+' | head -1)
+          group=$(grep -oE 'runAsGroup: *[0-9]+' deploy/deployment.yaml | grep -oE '[0-9]+' | head -1)
+          ro_root=$(grep -oE 'readOnlyRootFilesystem: *(true|false)' deploy/deployment.yaml \
+            | awk '{print $2}' | head -1)
+          # read-loop rather than mapfile: portable to any bash, and testable
+          # outside the runner. mapfile is a bash 4 builtin that yields an empty
+          # array instead of an error on older shells.
+          mount_paths=()
+          while IFS= read -r p; do mount_paths+=("$p"); done < <(
+            grep -oE 'mountPath: *[^ ]+' deploy/deployment.yaml | awk '{print $2}'
+          )
 
-          docker run -d --rm -p "8080:${port}" --name doggy-smoke doggy-countdown:ci
+          # Fail closed rather than silently smoke-testing an unrestricted
+          # container because a field moved or was renamed.
+          for v in port user group ro_root; do
+            if [ -z "${!v}" ]; then
+              echo "::error::could not read '${v}' from deploy/deployment.yaml"
+              exit 1
+            fi
+          done
+          if [ "${#mount_paths[@]}" -eq 0 ]; then
+            echo "::error::no volumeMounts found in deploy/deployment.yaml"
+            exit 1
+          fi
+
+          args=(--user "${user}:${group}" --cap-drop ALL --security-opt no-new-privileges)
+          [ "$ro_root" = "true" ] && args+=(--read-only)
+          for m in "${mount_paths[@]}"; do args+=(--tmpfs "$m"); done
+
+          echo "mirroring deployment: port=${port} user=${user}:${group} readOnlyRoot=${ro_root}"
+          printf '  writable mount: %s\n' "${mount_paths[@]}"
+
+          docker run -d --rm -p "8080:${port}" "${args[@]}" --name doggy-smoke doggy-countdown:ci
 
           # Fail closed: a homepage that never becomes ready is a broken image.
           ready=false
@@ -160,27 +195,49 @@ jobs:
         run: |
           set -euo pipefail
 
-          # HTTPRoute and CiliumNetworkPolicy are CRDs whose schemas are not in
-          # kubeconform's default store, so they are skipped. Pinning the EXPECTED
-          # skip count is what keeps that from hiding a core resource: if a
-          # Deployment ever stopped being validated, skipped would rise and this
-          # fails instead of reporting a clean run over nothing.
-          expected_skipped=2
+          # Validate exactly the manifests the kustomization references — the set
+          # that actually ships. A hard-coded file list would let a newly added,
+          # correctly-referenced manifest pass the membership check above and
+          # never reach kubeconform at all.
+          refs=()
+          while IFS= read -r r; do refs+=("$r"); done < <(
+            grep -oE '^[[:space:]]*-[[:space:]]+[A-Za-z0-9._-]+\.yaml[[:space:]]*$' \
+              deploy/kustomization.yaml | awk '{print $2}'
+          )
+          if [ "${#refs[@]}" -eq 0 ]; then
+            echo "::error::no manifests referenced from deploy/kustomization.yaml"
+            exit 1
+          fi
+          paths=(); for r in "${refs[@]}"; do paths+=("deploy/${r}"); done
+          printf 'validating %s referenced manifest(s)\n' "${#paths[@]}"
 
           out=$(docker run --rm -v "$PWD:/work" -w /work \
             ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
-            -strict -summary -ignore-missing-schemas \
-            deploy/deployment.yaml deploy/service.yaml \
-            deploy/pod-disruption-budget.yaml deploy/httproute.yaml \
-            deploy/networkpolicy.yaml)
-          echo "$out"
+            -strict -ignore-missing-schemas -output json "${paths[@]}")
+          printf '%s\n' "$out" | jq -r '.resources[] | "  \(.status)  \(.kind)  \(.filename)"'
 
-          skipped=$(printf '%s' "$out" | grep -oE 'Skipped: [0-9]+' | grep -oE '[0-9]+')
-          if [ "$skipped" != "$expected_skipped" ]; then
-            echo "::error::expected exactly ${expected_skipped} skipped (CRD) resources, got ${skipped}." \
-              "A core resource may have stopped being validated, or a CRD was added — update this count deliberately."
+          # These CRDs have no schema in kubeconform's default store, so they are
+          # skipped. Declaring WHICH kinds may be skipped — rather than how many —
+          # is what stops a core resource silently dropping out of validation: a
+          # skipped Deployment fails here instead of reading as a clean run.
+          allowed_skips='["HTTPRoute","CiliumNetworkPolicy"]'
+
+          # Normalise the status before comparing. kubeconform spells these
+          # "statusValid"/"statusSkipped"; matching the bare suffix
+          # case-insensitively keeps this check correct either way, rather than
+          # resting on a spelling this workflow never verifies.
+          bad=$(printf '%s' "$out" | jq -r --argjson allow "$allowed_skips" '
+            def norm: (. // "") | ascii_downcase | sub("^status"; "");
+            [ .resources[]
+              | select((.status | norm) != "valid")
+              | select((((.status | norm) == "skipped") and (.kind | IN($allow[]))) | not)
+            ] | map("\(.status) \(.kind // "?") \(.filename // "?")") | .[]')
+          if [ -n "$bad" ]; then
+            echo "::error::unexpected validation status (only these kinds may be skipped: ${allowed_skips}):"
+            printf '  %s\n' "$bad"
             exit 1
           fi
+          echo "✅ all ${#paths[@]} referenced manifests validated"
 
   ci-required-checks:
     name: CI - Required Checks
