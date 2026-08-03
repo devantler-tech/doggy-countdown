@@ -29,38 +29,58 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Validate EVERY date constant the page constructs, not just TARGET.
+          # START drives the progress bar, so a malformed value there renders NaN
+          # just as visibly — and a TARGET-only check would pass over it.
+          validate_ts() { # name, value
+            local n="$1" v="$2"
+            # The WHOLE timestamp, not just the calendar prefix: a valid date with
+            # a malformed time — 2026-08-24T25:00:00+02:00 — is an Invalid Date in
+            # the browser while a prefix-only check still passes.
+            if [[ ! "$v" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?(Z|[+-]([0-9]{2}):([0-9]{2}))$ ]]; then
+              echo "::error::${n} is not a well-formed RFC 3339 timestamp: ${v}"
+              return 1
+            fi
+            local hh="${BASH_REMATCH[1]}" mm="${BASH_REMATCH[2]}" ss="${BASH_REMATCH[3]}"
+            # The OFFSET fields too. +24:00 and +02:60 are both shape-valid and
+            # both Invalid Date, so stopping at the clock leaves NaN reachable.
+            local oh="${BASH_REMATCH[6]:-0}" om="${BASH_REMATCH[7]:-0}"
+            # 10#: zero-padded, and bash reads a leading zero as octal.
+            if ((10#$hh > 23 || 10#$mm > 59 || 10#$ss > 59)); then
+              echo "::error::${n} has an out-of-range time: ${v}"
+              return 1
+            fi
+            if ((10#$oh > 23 || 10#$om > 59)); then
+              echo "::error::${n} has an out-of-range UTC offset: ${v}"
+              return 1
+            fi
+            # The calendar date must be real too; date -u rejects 2026-02-30.
+            if ! date -u -d "${v%%T*}" >/dev/null 2>&1; then
+              echo "::error::${n} is not a real calendar date: ${v}"
+              return 1
+            fi
+            echo "  ✅ ${n} = ${v}"
+          }
+
+          ts_status=0
+          found_any=0
+          while IFS= read -r line; do
+            name=${line%%=*}; name=${name// /}
+            value=$(printf '%s' "$line" | grep -oE "'[^']+'" | tr -d "'")
+            found_any=1
+            validate_ts "$name" "$value" || ts_status=1
+          done < <(grep -oE "[A-Z_]+ *= *new Date\('[^']+'\)" public/index.html || true)
+
+          if [ "$found_any" != 1 ]; then
+            echo "::error::found no 'new Date(...)' constants in public/index.html"
+            exit 1
+          fi
+          [ "$ts_status" = 0 ] || exit 1
+
           iso=$(grep -oE "TARGET *= *new Date\('[^']+'\)" public/index.html \
             | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}T[^']*" || true)
           if [ -z "$iso" ]; then
             echo "::error::could not find the TARGET date in public/index.html"
-            exit 1
-          fi
-
-          # Validate the WHOLE timestamp, not just the calendar prefix. A valid
-          # date with a malformed time — 2026-08-24T25:00:00+02:00 — yields an
-          # Invalid Date in the browser and renders NaN, while every check below
-          # (which only ever looks at the prefix) would still pass.
-          if [[ ! "$iso" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T([0-9]{2}):([0-9]{2}):([0-9]{2})(Z|[+-]([0-9]{2}):([0-9]{2}))$ ]]; then
-            echo "::error::countdown target is not a well-formed RFC 3339 timestamp: ${iso}"
-            exit 1
-          fi
-          hh="${BASH_REMATCH[1]}"; mm="${BASH_REMATCH[2]}"; ss="${BASH_REMATCH[3]}"
-          # The OFFSET fields too, not just the clock. +24:00 and +02:60 are both
-          # shape-valid and both Invalid Date in a browser, so a range check that
-          # stops at the clock leaves the same NaN countdown reachable.
-          oh="${BASH_REMATCH[5]:-0}"; om="${BASH_REMATCH[6]:-0}"
-          # 10#: these are zero-padded, and bash reads a leading zero as octal.
-          if ((10#$hh > 23 || 10#$mm > 59 || 10#$ss > 59)); then
-            echo "::error::countdown target has an out-of-range time: ${iso}"
-            exit 1
-          fi
-          if ((10#$oh > 23 || 10#$om > 59)); then
-            echo "::error::countdown target has an out-of-range UTC offset: ${iso}"
-            exit 1
-          fi
-          # The calendar date must also be real; date -u rejects 2026-02-30.
-          if ! date -u -d "${iso%%T*}" >/dev/null 2>&1; then
-            echo "::error::countdown target is not a real calendar date: ${iso}"
             exit 1
           fi
 
@@ -166,7 +186,7 @@ jobs:
           # Fail closed: a homepage that never becomes ready is a broken image.
           ready=false
           for _ in $(seq 1 30); do
-            if curl -fsS -o /dev/null "${base}/"; then ready=true; break; fi
+            if curl -fsS --max-time 10 -o /dev/null "${base}/"; then ready=true; break; fi
             sleep 1
           done
           if [ "$ready" != true ]; then
@@ -179,7 +199,7 @@ jobs:
           # The image must serve the asset this PR actually checked, not merely
           # something with a 200. Compare against the countdown target, which
           # date-consistency has already pinned to the rendered dates.
-          served=$(curl -fsS "${base}/")
+          served=$(curl -fsS --max-time 10 "${base}/")
 
           iso=$(grep -oE "TARGET *= *new Date\('[^']+'\)" public/index.html \
             | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}T[^']*")
@@ -199,21 +219,28 @@ jobs:
           # invisible here and break in production exactly like a missing <img>.
           assets=()
           while IFS= read -r a; do assets+=("$a"); done < <(
+            # `|| true` on EVERY extractor. grep exits 1 when it matches
+            # nothing, and under `set -e` that aborts the whole group — so an
+            # earlier pattern with no matches silently disables every later one.
+            # The checked-in page has no single-quoted attributes, which made
+            # the CSS extractor below dead code until this was fixed.
             {
               # Single-quoted attributes are valid HTML, so match both quote
               # styles: a src='...' asset would otherwise never be requested.
               grep -oE "(src|href)=\"[^\"]+\"" public/index.html \
-                | sed -E 's/^(src|href)="//; s/"$//'
+                | sed -E 's/^(src|href)="//; s/"$//' || true
               grep -oE "(src|href)='[^']+'" public/index.html \
-                | sed -E "s/^(src|href)='//; s/'$//"
-              grep -oE "url\((\"|')?[^)\"']+" public/index.html \
-                | sed -E "s/^url\\((\"|')?//"
+                | sed -E "s/^(src|href)='//; s/'$//" || true
+              # url( 'x' ) with padding is valid CSS, so allow whitespace and
+              # strip the trailing quote the optional opening one implies.
+              grep -oE "url\([[:space:]]*(\"|')?[^)\"']+" public/index.html \
+                | sed -E "s/^url\\([[:space:]]*(\"|')?//; s/[[:space:]]+$//" || true
             } | grep -vE '^([a-zA-Z]+:|//|#|data:|mailto:)' | grep -v '^$' | sort -u
           )
 
           status=0
           for a in "${assets[@]}"; do
-            if curl -fsS -o /dev/null "${base}/${a#/}"; then
+            if curl -fsS --max-time 10 -o /dev/null "${base}/${a#/}"; then
               echo "  ✅ ${a}"
             else
               echo "::error::referenced asset is not served: ${a}"
