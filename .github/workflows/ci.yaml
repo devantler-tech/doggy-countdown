@@ -1,0 +1,64 @@
+name: ✅ CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  container-smoke:
+    name: Container Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build -t simba-smoke .
+      # The site is served straight out of the image, so building is not
+      # evidence that it works: a dropped COPY, a renamed asset, or a bad
+      # nginx root all still produce an image that starts and answers 404s.
+      # Assert against the running container instead.
+      - name: Serve the image and assert it carries the site
+        run: |
+          docker run -d --rm -p 8080:8080 --name simba-smoke simba-smoke
+          # Fail closed: a homepage that never becomes ready is a broken image.
+          ready=false
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:8080/; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs simba-smoke || true
+            docker stop simba-smoke
+            echo "::error::container homepage did not become ready within 30s"
+            exit 1
+          fi
+          body=$(curl -fsS http://localhost:8080/)
+          img_code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/img/simba.jpg)
+          docker stop simba-smoke
+          # The countdown page, not just any 200.
+          if ! printf '%s' "$body" | grep -q '<title>Simba is coming home</title>'; then
+            echo "::error::homepage served, but it is not the countdown page"
+            exit 1
+          fi
+          # The photo is the page's only binary asset and the one most likely
+          # to be lost by a path change; a 404 here is a visibly broken site.
+          if [ "$img_code" != "200" ]; then
+            echo "::error::expected 200 for /img/simba.jpg, got $img_code"
+            exit 1
+          fi
+
+  ci-required-checks:
+    name: CI - Required Checks
+    runs-on: ubuntu-latest
+    needs: [container-smoke]
+    permissions: {}
+    if: ${{ always() }}
+    steps:
+      - name: 📊 Require all CI checks to pass
+        uses: devantler-tech/actions/aggregate-job-checks@4f9b2bb971efb754b719e8ecb39bdf74b2490c33 # v13.0.0
+        with:
+          job-results: >-
+            ${{ needs.container-smoke.result }}
