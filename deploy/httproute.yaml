@@ -9,7 +9,11 @@ metadata:
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: Simba Countdown
     gethomepage.dev/description: Countdown to the day Simba comes home.
-    gethomepage.dev/group: Fun
+    # Must match a group declared in the platform's Homepage layout
+    # (k8s/bases/apps/homepage/config-map.yaml). An undeclared group still
+    # renders, but sorts alphabetically with a generic icon instead of taking
+    # its configured position and icon.
+    gethomepage.dev/group: Personal Sites
     gethomepage.dev/icon: mdi-dog
     gethomepage.dev/href: https://simba.platform.devantler.tech
     gethomepage.dev/pod-selector: app.kubernetes.io/name=doggy-countdown
