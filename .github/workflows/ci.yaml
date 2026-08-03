@@ -173,7 +173,11 @@ jobs:
           fi
 
           args=(--user "${user}:${group}" --cap-drop ALL --security-opt no-new-privileges)
-          [ "$ro_root" = "true" ] && args+=(--read-only)
+          # `if`, not `test && cmd`: a standalone list returns the test's status,
+          # so a manifest that legitimately sets readOnlyRootFilesystem: false
+          # would end the step under `set -e` with a bare exit — the container
+          # never starting, for a value the manifest is allowed to hold.
+          if [ "$ro_root" = "true" ]; then args+=(--read-only); fi
           for m in "${mount_paths[@]}"; do args+=(--tmpfs "$m"); done
 
           # Host port is this workflow's choice; container port comes from the
