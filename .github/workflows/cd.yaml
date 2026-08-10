@@ -14,9 +14,17 @@ jobs:
       contents: read # checkout
       packages: write # push image + manifests OCI artifact
       id-token: write # keyless cosign signing (via GitHub OIDC)
-    uses: devantler-tech/actions/.github/workflows/publish-app.yaml@9705e47d7df0b556ec06786247297c0e5020e56d # v10.2.1
+    uses: devantler-tech/actions/.github/workflows/publish-app.yaml@61d9c87b302523778789c7cf09655b87b6716e87 # v13.0.4
     with:
       # publish-app pins the freshly built image digest into the container with
       # this name in deploy/deployment.yaml. Keep that container's name equal to
       # the repository name (the platform's signed-publish convention).
       app-name: ${{ github.event.repository.name }}
+      # The signature this publish mints carries the `uses:` ref above in its
+      # certificate. This app's OCIRepository rule already matches that subject
+      # as `publish-app.yaml@[0-9a-f]{40}$` — SHA-only, with no tag alternative —
+      # so a non-SHA ref fails closed in-cluster today. Enabling the guard adds
+      # the producer-side half: the publish refuses to sign at all, before the
+      # build, instead of minting an artifact that would silently stall Flux
+      # reconciliation when verification later rejects it.
+      enable-caller-pin: true
