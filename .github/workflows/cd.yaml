@@ -21,12 +21,10 @@ jobs:
       # the repository name (the platform's signed-publish convention).
       app-name: ${{ github.event.repository.name }}
       # The signature this publish mints carries the `uses:` ref above in its
-      # certificate, and the platform's OCIRepository rules accept that subject
-      # as `publish-app.yaml@([0-9a-f]{40}|refs/tags/v.+)`. The tag alternative is
-      # the exposure: a tag is mutable, so a moved `v*` tag in the actions repo
-      # would let arbitrary workflow code mint a signature the cluster still
-      # trusts. (A branch ref fails closed instead — the rule rejects it, so the
-      # artifact simply never verifies.) Requiring a commit SHA closes the tag
-      # path from the producer side, so the publish fails before signing rather
-      # than emitting an over-trusted artifact.
+      # certificate. This app's OCIRepository rule already matches that subject
+      # as `publish-app.yaml@[0-9a-f]{40}$` — SHA-only, with no tag alternative —
+      # so a non-SHA ref fails closed in-cluster today. Enabling the guard adds
+      # the producer-side half: the publish refuses to sign at all, before the
+      # build, instead of minting an artifact that would silently stall Flux
+      # reconciliation when verification later rejects it.
       enable-caller-pin: true
